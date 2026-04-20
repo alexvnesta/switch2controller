@@ -1,0 +1,158 @@
+// Switch 2 BT MAC finder — BLE passive scanner
+//
+// Purpose: log every BLE device we see, highlighting Nintendo-ish ones
+// (company ID 0x0553, Nintendo VID 0x057E) and close-proximity ones
+// (RSSI > -60 dBm), so we can identify the Switch 2's BT MAC by moving
+// the ESP32 very close to it while it's in pairing mode.
+//
+// Usage:
+//   1. Flash this firmware
+//   2. Open serial monitor (115200 baud)
+//   3. On Switch 2: System Settings → Controllers & Accessories →
+//      Change Grip/Order (this activates Bluetooth)
+//   4. Move the ESP32 within a few centimeters of the Switch 2
+//   5. Watch the serial log; the loudest (highest RSSI) device with
+//      Nintendo markers or a nearby MAC is the Switch 2
+//
+// LED: solid ON while scanning, briefly blinks on every Nintendo-ish hit
+
+#include <string.h>
+#include "esp_log.h"
+#include "nvs_flash.h"
+#include "driver/gpio.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
+#include "nimble/nimble_port.h"
+#include "nimble/nimble_port_freertos.h"
+#include "host/ble_hs.h"
+#include "host/ble_gap.h"
+
+#define TAG "ble_scan"
+#define LED_GPIO 2
+
+static void led_on(void)  { gpio_set_level(LED_GPIO, 1); }
+static void led_off(void) { gpio_set_level(LED_GPIO, 0); }
+
+static void led_pulse(void) {
+    led_off();
+    vTaskDelay(pdMS_TO_TICKS(30));
+    led_on();
+}
+
+// Look for Nintendo-flavored bytes anywhere in the advertising payload
+static bool has_nintendo_markers(const uint8_t *data, int len, const char **why) {
+    for (int i = 0; i + 1 < len; i++) {
+        // Company ID 0x0553 (Nintendo's BT SIG Member ID, little-endian)
+        if (data[i] == 0x53 && data[i + 1] == 0x05) {
+            *why = "company 0x0553";
+            return true;
+        }
+        // Nintendo VID 0x057E (little-endian)
+        if (data[i] == 0x7E && data[i + 1] == 0x05) {
+            *why = "VID 0x057E";
+            return true;
+        }
+    }
+    return false;
+}
+
+static int gap_event(struct ble_gap_event *event, void *arg) {
+    if (event->type != BLE_GAP_EVENT_DISC &&
+        event->type != BLE_GAP_EVENT_DISC_COMPLETE) return 0;
+
+    if (event->type == BLE_GAP_EVENT_DISC_COMPLETE) {
+        ESP_LOGI(TAG, "scan complete reason=%d", event->disc_complete.reason);
+        return 0;
+    }
+
+    struct ble_gap_disc_desc *d = &event->disc;
+    const uint8_t *mac = d->addr.val;  // NimBLE gives this reversed
+
+    // Filter: only log Nintendo OUI (E0:EF:BF) or any packet with Nintendo markers.
+    // In NimBLE's reversed layout, OUI E0:EF:BF appears as the last 3 bytes.
+    bool ninty_oui = (mac[5] == 0xE0 && mac[4] == 0xEF && mac[3] == 0xBF);
+    const char *why = NULL;
+    bool ninty_data = has_nintendo_markers(d->data, d->length_data, &why);
+
+    if (!ninty_oui && !ninty_data) return 0;
+
+    char mac_str[18];
+    snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
+             mac[5], mac[4], mac[3], mac[2], mac[1], mac[0]);
+
+    // Event type helps distinguish:
+    //   BLE_HCI_ADV_TYPE_ADV_IND = 0x00 (connectable undirected)
+    //   ADV_DIRECT_IND = 0x01 (connectable directed — what paired reconnect uses!)
+    //   ADV_SCAN_IND = 0x02
+    //   ADV_NONCONN_IND = 0x03
+    //   SCAN_RSP = 0x04
+    const char *evt_name = "?";
+    switch (d->event_type) {
+        case 0x00: evt_name = "ADV_IND"; break;
+        case 0x01: evt_name = "ADV_DIRECT_IND"; break;
+        case 0x02: evt_name = "ADV_SCAN_IND"; break;
+        case 0x03: evt_name = "ADV_NONCONN_IND"; break;
+        case 0x04: evt_name = "SCAN_RSP"; break;
+    }
+
+    led_pulse();
+    ESP_LOGW(TAG, "★ %s  RSSI=%d  type=%d  evt=%s%s",
+             mac_str, d->rssi, d->addr.type, evt_name,
+             ninty_data ? "  [mfg data]" : "");
+
+    char buf[128];
+    int pos = 0;
+    for (int i = 0; i < d->length_data && pos < (int)sizeof(buf) - 3; i++) {
+        pos += snprintf(buf + pos, sizeof(buf) - pos, "%02X ", d->data[i]);
+    }
+    printf("        raw: %s\n", buf);
+    return 0;
+}
+
+static void on_sync(void) {
+    struct ble_gap_disc_params params = {
+        .itvl = 0x0060,             // 60 ms scan interval
+        .window = 0x0060,           // 60 ms window (100% scan duty cycle)
+        .filter_policy = 0,
+        .limited = 0,
+        .passive = 0,               // ACTIVE — send scan_req to get scan responses
+        .filter_duplicates = 0,     // show repeats so we see active devices
+    };
+    int rc = ble_gap_disc(BLE_OWN_ADDR_PUBLIC, BLE_HS_FOREVER, &params, gap_event, NULL);
+    if (rc != 0) {
+        ESP_LOGE(TAG, "ble_gap_disc failed: %d", rc);
+        return;
+    }
+    led_on();
+    ESP_LOGI(TAG, "scanning... (★ = Nintendo marker, else RSSI > -80 dBm only)");
+    ESP_LOGI(TAG, "on the Switch 2: System Settings → Controllers → Change Grip/Order");
+    ESP_LOGI(TAG, "then bring the ESP32 within a few cm of the console");
+}
+
+static void host_task(void *param) {
+    nimble_port_run();
+    nimble_port_freertos_deinit();
+}
+
+void app_main(void) {
+    gpio_config_t led_cfg = {
+        .pin_bit_mask = (1ULL << LED_GPIO),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    gpio_config(&led_cfg);
+    led_off();
+
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        nvs_flash_erase();
+        nvs_flash_init();
+    }
+
+    nimble_port_init();
+    ble_hs_cfg.sync_cb = on_sync;
+    nimble_port_freertos_init(host_task);
+}

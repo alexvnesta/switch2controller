@@ -1,0 +1,21 @@
+.DS_Store
+*.swp
+*.swo
+.env
+build/
+.pio/
+.pioenvs/
+.piolibdeps/
+__pycache__/
+*.pyc
+references/BlueRetro/
+
+# PlatformIO generated artifacts
+esp32/sdkconfig.esp32dev
+esp32/sdkconfig.*.old
+
+# Secrets — captured BT MACs for your specific Switch 2 / Joy-Cons
+esp32/src/secrets.h
+
+# Firmware samples and bulky captures
+/tmp/*.log
