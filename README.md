@@ -2,7 +2,9 @@
 
 Wake a Nintendo Switch 2 from sleep using a cheap ESP32 as a BLE beacon — reverse-engineered from scratch.
 
-**Status: working.** The `esp32/` firmware successfully wakes a Switch 2 when configured with the target Switch's BT MAC and a bonded Joy-Con's BT MAC.
+**Status: wake-beacon working.** The `esp32/` firmware successfully wakes a Switch 2 when configured with the target Switch's BT MAC and a bonded Joy-Con's BT MAC.
+
+**Open goal (not yet working)**: triggering the wake from a Switch 1 Pro Controller HOME press. See [`docs/status-and-next-steps.md`](docs/status-and-next-steps.md) for what was tried, what's blocked, and realistic paths forward.
 
 ## How it works
 
