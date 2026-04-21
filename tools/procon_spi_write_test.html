@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pro Controller SPI Write Region Tests</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; max-width: 760px; margin: 2em auto; padding: 0 1em; line-height: 1.5; }
+  h1 { font-size: 1.4em; }
+  h2 { font-size: 1.1em; margin-top: 1.5em; padding-top: 1em; border-top: 1px solid #ddd; }
+  button { font-size: 1em; padding: 0.5em 1em; cursor: pointer; margin-right: 0.5em; }
+  button:disabled { cursor: not-allowed; opacity: 0.5; }
+  button.danger { background: #fee; border: 1px solid #f88; color: #800; }
+  button.confirm { background: #dfd; border: 1px solid #8c8; color: #060; }
+  #log { background: #1a1a1a; color: #c0c0c0; padding: 1em; border-radius: 6px; font-family: ui-monospace, Menlo, monospace; font-size: 0.85em; height: 400px; overflow-y: auto; white-space: pre-wrap; }
+  .info { background: #fef3c7; border-left: 4px solid #f59e0b; padding: 0.75em; border-radius: 4px; font-size: 0.9em; margin: 1em 0; }
+  code { background: #eee; padding: 1px 4px; border-radius: 3px; font-size: 0.9em; }
+  .step { padding: 0.75em; border: 1px solid #ddd; border-radius: 6px; margin: 0.5em 0; }
+  .step.disabled { opacity: 0.5; pointer-events: none; }
+  .step h3 { margin-top: 0; font-size: 1em; }
+  .result-pass { color: #060; font-weight: bold; margin-top: 0.5em; }
+  .result-fail { color: #c00; font-weight: bold; margin-top: 0.5em; }
+  .result-info { color: #04a; font-weight: bold; margin-top: 0.5em; }
+</style>
+</head>
+<body>
+<h1>Pro Controller SPI Write — Region Probe</h1>
+
+<div class="info">
+<b>Goal:</b> Determine which SPI regions accept writes on this firmware.
+Per dekuNukem's docs, status byte <code>0x01</code> from subcommand 0x11 means
+"<b>write protected</b>". We'll probe each region with a single-byte write and report
+the status code.
+<br><br>
+Each test is self-contained: it reads current value, writes a small change,
+verifies, then restores the original byte. Total impact on controller behavior: zero.
+</div>
+
+<h2>Tests</h2>
+
+<div class="step" id="step1">
+  <h3>Test 1 — Connect</h3>
+  <button id="connect">Connect Pro Controller</button>
+  <div id="step1-result"></div>
+</div>
+
+<div class="step disabled" id="step2">
+  <h3>Test 2 — Write to color region (0x6050)</h3>
+  <p>Body color byte. JC Toolkit modifies this region for color customization,
+     so it should be writable on stock firmware.</p>
+  <button id="test-color" class="danger">Test Color Region Write</button>
+  <div id="step2-result"></div>
+</div>
+
+<div class="step disabled" id="step3">
+  <h3>Test 3 — Re-confirm patch RAM (0x1DB9B)</h3>
+  <p>Should fail with <code>0x01</code> "write protected" again, confirming our
+     earlier result was deterministic.</p>
+  <button id="test-patchram" class="danger">Test Patch RAM Write</button>
+  <div id="step3-result"></div>
+</div>
+
+<div class="step disabled" id="step4">
+  <h3>Test 4 — Patch RAM alt slot (0x28100)</h3>
+  <p>DS2 region (where the OTA-updated firmware actually runs from). Probably
+     also write-protected, but worth confirming.</p>
+  <button id="test-ds2" class="danger">Test DS2 Write</button>
+  <div id="step4-result"></div>
+</div>
+
+<h2>Log</h2>
+<div id="log"></div>
+
+<script type="module">
+const VID = 0x057E;
+const PIDS = [0x2009, 0x2006, 0x2007];
+
+// Global write bound — refuse to operate outside SPI flash range
+const SPI_MAX = 0x80000;
+
+function log(msg) {
+  const el = document.getElementById('log');
+  const ts = new Date().toLocaleTimeString();
+  el.textContent += `[${ts}] ${msg}\n`;
+  el.scrollTop = el.scrollHeight;
+}
+
+function setResult(elId, text, cssClass) {
+  const el = document.getElementById(elId);
+  el.textContent = text;
+  if (cssClass) el.className = cssClass;
+}
+
+let device = null;
+let packetNum = 0;
+
+async function sendReport(reportId, sendData, filter, timeout = 1000, retry = 5) {
+  return new Promise((resolve, reject) => {
+    let resolved = false;
+    const timeoutHandle = setTimeout(() => {
+      if (resolved) return;
+      device.removeEventListener('inputreport', reporter);
+      if (retry > 0) {
+        sendReport(reportId, sendData, filter, timeout, retry - 1).then(resolve).catch(reject);
+      } else {
+        reject(new Error(`timeout reportId=${reportId}`));
+      }
+    }, timeout);
+    const reporter = ({ reportId: rid, data }) => {
+      if (filter?.(rid, data)) {
+        resolved = true;
+        clearTimeout(timeoutHandle);
+        device.removeEventListener('inputreport', reporter);
+        resolve(data);
+      }
+    };
+    device.addEventListener('inputreport', reporter);
+    device.sendReport(reportId, sendData);
+  });
+}
+
+async function usbHandshake() {
+  const collections = device.collections || [];
+  const hasOutput80 = collections[0]?.outputReports?.find(r => r.reportId === 0x80);
+  if (!hasOutput80) { log('USB-mode not available; skipping handshake'); return; }
+  log('USB handshake...');
+  await device.sendReport(0x80, new Uint8Array([0x05]));
+  await sendReport(0x80, new Uint8Array([0x02]),
+    (id, d) => id === 0x81 && d?.getUint8(0) === 0x02, 500, 3)
+    .catch(() => log('handshake reply not received (continuing)'));
+  await device.sendReport(0x80, new Uint8Array([0x04]));
+  log('handshake complete');
+}
+
+async function spiRead(address, length) {
+  const sendData = new Uint8Array(5);
+  const dv = new DataView(sendData.buffer);
+  dv.setUint32(0, address, true);
+  dv.setUint8(4, length);
+  const reportData = new Uint8Array([packetNum++ & 0xF, 0, 1, 64, 64, 0, 1, 64, 64, 0x10, ...sendData]);
+  const filter = (rid, d) => {
+    if (rid !== 0x21 || d.getUint8(13) !== 0x10) return false;
+    const echoAddr = d.getUint32(14, true);
+    const echoLen = d.getUint8(18);
+    return echoAddr === address && echoLen === length;
+  };
+  const reply = await sendReport(0x01, reportData, filter, 500, 5);
+  return new Uint8Array(reply.buffer.slice(19, 19 + length));
+}
+
+async function spiWrite(address, data) {
+  if (address < 0 || address + data.length > SPI_MAX) {
+    throw new Error(`Address 0x${address.toString(16)} outside SPI range`);
+  }
+  const sendData = new Uint8Array(5 + data.length);
+  const dv = new DataView(sendData.buffer);
+  dv.setUint32(0, address, true);
+  dv.setUint8(4, data.length);
+  sendData.set(data, 5);
+  const reportData = new Uint8Array([packetNum++ & 0xF, 0, 1, 64, 64, 0, 1, 64, 64, 0x11, ...sendData]);
+  const filter = (rid, d) => rid === 0x21 && d.getUint8(13) === 0x11;
+  const reply = await sendReport(0x01, reportData, filter, 1000, 5);
+  return reply.getUint8(14);  // status byte: 0x00 = success, 0x01 = write protected
+}
+
+// --- Generic write test wrapper ---
+// Reads current value at addr, writes (orig XOR 0x01) to flip one bit, verifies,
+// then attempts to restore original. Returns:
+//   {status: 'PASS'|'FAIL', writeStatusByte, verifyMatched, restoreStatusByte, restoredOk}
+async function probeWrite(addr, label) {
+  log(`\n=== Probing write to SPI 0x${addr.toString(16).toUpperCase()} (${label}) ===`);
+  const orig = (await spiRead(addr, 1))[0];
+  const test = orig ^ 0x01;  // flip lowest bit; harmless single-bit change
+  log(`  Original byte: 0x${orig.toString(16).padStart(2,'0').toUpperCase()}; will write 0x${test.toString(16).padStart(2,'0').toUpperCase()}`);
+
+  let writeStatus, verifiedNew, restoreStatus, verifiedRestore;
+  try {
+    writeStatus = await spiWrite(addr, new Uint8Array([test]));
+    log(`  Write status: 0x${writeStatus.toString(16).padStart(2,'0').toUpperCase()} ` +
+      (writeStatus === 0x00 ? '(success)' : writeStatus === 0x01 ? '(write protected)' : '(other)'));
+  } catch (e) {
+    log(`  Write threw: ${e.message}`);
+    return { result: 'ERROR', writeStatus: 'thrown', error: e.message };
+  }
+
+  const verify = (await spiRead(addr, 1))[0];
+  verifiedNew = (verify === test);
+  log(`  Verify read: 0x${verify.toString(16).padStart(2,'0').toUpperCase()}` +
+    (verifiedNew ? ` (matches written value — write took effect)` : ` (still original — write was silently/explicitly refused)`));
+
+  // Always attempt restore even if verify shows no change (no-op write is safe)
+  try {
+    restoreStatus = await spiWrite(addr, new Uint8Array([orig]));
+    const verify2 = (await spiRead(addr, 1))[0];
+    verifiedRestore = (verify2 === orig);
+    log(`  Restore status: 0x${restoreStatus.toString(16).padStart(2,'0').toUpperCase()}, verify: 0x${verify2.toString(16).padStart(2,'0').toUpperCase()} ${verifiedRestore ? '(restored)' : '(NOT restored — manual recovery needed!)'}`);
+  } catch (e) {
+    log(`  Restore threw: ${e.message}`);
+    restoreStatus = 'thrown';
+  }
+
+  const result = (writeStatus === 0x00 && verifiedNew) ? 'PASS' : 'FAIL';
+  return { result, writeStatus, verifiedNew, restoreStatus };
+}
+
+document.getElementById('connect').onclick = async () => {
+  try {
+    const filters = PIDS.map(pid => ({ vendorId: VID, productId: pid }));
+    const devs = await navigator.hid.requestDevice({ filters });
+    if (!devs.length) { log('No device selected'); return; }
+    device = devs[0];
+    if (!device.opened) await device.open();
+    log(`Connected: ${device.productName} (PID 0x${device.productId.toString(16)})`);
+    await usbHandshake();
+    setResult('step1-result', 'Connected. Run tests in order.', 'result-info');
+    document.getElementById('step2').classList.remove('disabled');
+    document.getElementById('step3').classList.remove('disabled');
+    document.getElementById('step4').classList.remove('disabled');
+  } catch (e) {
+    log(`ERROR: ${e.message}`);
+  }
+};
+
+document.getElementById('test-color').onclick = async () => {
+  const r = await probeWrite(0x6050, 'body color');
+  if (r.result === 'PASS') {
+    setResult('step2-result', `PASS — color region accepts writes (status 0x${r.writeStatus.toString(16).padStart(2,'0')})`, 'result-pass');
+  } else {
+    const code = (r.writeStatus === 'thrown') ? r.writeStatus : `0x${r.writeStatus.toString(16).padStart(2,'0')}`;
+    setResult('step2-result', `FAIL — write status ${code}, verify ${r.verifiedNew ? 'matched' : 'unchanged'}`, 'result-fail');
+  }
+};
+
+document.getElementById('test-patchram').onclick = async () => {
+  const r = await probeWrite(0x1DB9B, 'patch RAM DS1 — Joy-Con (L) string');
+  if (r.result === 'PASS') {
+    setResult('step3-result', `UNEXPECTED PASS — patch RAM is writable! Status 0x${r.writeStatus.toString(16).padStart(2,'0')}`, 'result-pass');
+  } else {
+    const code = (r.writeStatus === 'thrown') ? r.writeStatus : `0x${r.writeStatus.toString(16).padStart(2,'0')}`;
+    setResult('step3-result', `FAIL (expected) — write status ${code}`, 'result-fail');
+  }
+};
+
+document.getElementById('test-ds2').onclick = async () => {
+  const r = await probeWrite(0x28100, 'patch RAM DS2 — active OTA-updated firmware');
+  if (r.result === 'PASS') {
+    setResult('step4-result', `UNEXPECTED PASS — DS2 is writable! Status 0x${r.writeStatus.toString(16).padStart(2,'0')}`, 'result-pass');
+  } else {
+    const code = (r.writeStatus === 'thrown') ? r.writeStatus : `0x${r.writeStatus.toString(16).padStart(2,'0')}`;
+    setResult('step4-result', `FAIL — write status ${code}`, 'result-fail');
+  }
+};
+</script>
+</body>
+</html>

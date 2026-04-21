@@ -33,19 +33,17 @@ See [`research/findings.md`](research/findings.md) for the comprehensive evidenc
 | **B**: Physical mod — XIAO ESP32-C3 inside controller, GPIO-tap HOME | 1 evening + soldering | ~90% | Soldering risk, ~$8 hardware | Pragmatic. See [`plans/pro-controller-piggyback-mod.md`](plans/pro-controller-piggyback-mod.md). |
 | **C**: Claim Switch 2's classic BT MAC and page-scan | 1-2 days | high | Causes pairing chaos during gameplay | **Rejected by user.** |
 | **D**: Sidestep — Wi-Fi HTTP trigger / BLE remote button / deep-sleep dongle | ~1 evening | ~99% | Doesn't use Pro Controller | Simplest "wake from across room" path. |
-| **Tier 1 Stage 1**: Disassembly scout — identify ROM addresses + OTA magic scheme | 10-15 hours | ~60% useful info | Pure information gathering, no risk | **Promoted to viable** by SPI dump diff findings. See [`plans/tier1-disassembly-plan.md`](plans/tier1-disassembly-plan.md). |
-| **Tier 1 Stage 2**: "Hello BLE" custom patch RAM (proof BLE adv emits at all) | 10-15 hours | ~50% conditional | Real brick risk, mitigated by SPI restore | After Stage 1. |
-| **Tier 1 Stage 3**: Ship working wake-adv-emitting Pro Controller firmware | 6 months part-time | ~15% combined | All-or-nothing | After Stage 2. |
+| **Tier 1**: Modify Pro Controller firmware via patch RAM | — | ~2-3% | All-or-nothing | **Empirically blocked** (2026-04-21). Patch RAM (DS1 + DS2) returns `0x01` "write protected" on every probe; only color region accepts writes. See [`research/spi-write-test-results.md`](research/spi-write-test-results.md). |
 
 ### Recommended next move
 
-Pick one of three based on goal:
+Pick one of two based on goal:
 
 1. **"I want a working HOME→wake feature soon"** → finish Path A (BlueRetro fork). 2-3 days. Outstanding work in [`procon-bridge/README.md`](../procon-bridge/README.md): set Switch 2 MAC, bypass `wired_init_task` waitloop, build, flash, test.
 
-2. **"I want to know whether modifying the Pro Controller firmware is feasible"** → start Tier 1 Stage 1 (disassembly scout). 10-15 hours of focused Hopper/Ghidra work. Produces three structurally important answers regardless of outcome. See [`plans/tier1-disassembly-plan.md`](plans/tier1-disassembly-plan.md).
+2. **"I want the simplest possible 'wake the Switch 2 from across the room' UX"** → Path D (Wi-Fi HTTP trigger or BLE remote button). 1 evening of work, ships immediately. Doesn't use the Pro Controller specifically.
 
-3. **"I want the simplest possible 'wake the Switch 2 from across the room' UX"** → Path D (Wi-Fi HTTP trigger or BLE remote button). 1 evening of work, ships immediately. Doesn't use the Pro Controller specifically.
+Tier 1 (firmware mod) was investigated and ruled out — the chip's patch RAM regions are write-protected on current firmware. See [`research/spi-write-test-results.md`](research/spi-write-test-results.md). The Tier 1 disassembly plan in [`plans/tier1-disassembly-plan.md`](plans/tier1-disassembly-plan.md) is preserved for documentation but no longer recommended.
 
 ## Future work ideas (not on critical path)
 
