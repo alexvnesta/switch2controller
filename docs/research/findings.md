@@ -91,7 +91,7 @@ Premise: HelloRayH's SDR captures showed the Pro Controller waking via BLE adv c
 
 4. **Does the Pro Controller's BCM ROM contain a usable BLE adv code path that patch RAM could call into?** Implied yes by "BLE ACL buffer allocation fail" + dual-mode chip nature, but unverified. Resolvable by finding ROM call addresses in patch RAM and matching against known Broadcom symbol patterns (InternalBlue's BCM4339/BCM43430 work).
 
-5. **Does the Pro Controller's two-bonding-slot NVRAM allow simultaneous Switch 2 + ESP32 pairing?** Critical for Path A's user experience. Resolvable by Path A implementation + experiment.
+5. **Can a Switch 1 Pro Controller simultaneously bond to the ESP32 (for wake triggering) AND the Switch 2 (for gameplay)?** Critical for Path A's user experience. The SPI bonding record at `0x2000` in mfro's dump shows a single 32-byte host entry immediately followed by `0xFF` erased flash — no second-slot structure is populated, and unlike the Switch 2 Joy-Con's `count * 0x28` table (`ndeadly-switch2-research/memory_layout.md:106`), there's no item-count byte suggesting an array. Stock Switch 1 Pro Controller firmware appears to be single-host. An earlier version of this doc framed this as "the two-bonding-slot NVRAM" — that was a confusion with Switch 2 Joy-Con layout and not supported by the Switch 1 SPI dump. Resolvable definitively by Path A implementation + experiment.
 
 ## See also
 

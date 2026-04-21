@@ -1,5 +1,7 @@
 # Tier 1 plan: BCM20734 patch RAM disassembly + "Hello BLE" custom firmware
 
+> **⚠️ BLOCKED at the delivery layer (2026-04-21) — kept for reference.** The write-path safety experiment in Stage 2b was run earlier than planned, out of order, as a cheap no-risk probe. On fw 4.33, single-byte XOR writes to both DS1 (`0x10000`+) and DS2 (`0x28000`+) return status `0x01` "write protected"; the same write protocol succeeds at `0x6050` (color region). See [`../research/spi-write-test-results.md`](../research/spi-write-test-results.md). This is the hard blocker for the entire plan — even a perfect Stage 1 disassembly produces a patch that can't be delivered. Stage 1 (pure disassembly) could still produce a publishable BCM20734 patch RAM symbol map of independent value to Switch 1 controller research, but Stages 2-3 as written require a write path we don't have. See the "remaining theoretical paths" section of `spi-write-test-results.md` for what it would take to unblock (reverse-engineer Nintendo's OTA unlock, find a patch RAM memory-safety vuln, or desolder the SPI flash — none currently tractable for this hobby project).
+
 This is the concrete work plan for evaluating whether the Pro Controller's stock firmware can be modified to emit BLE adv. Splits into independent stages with clear go/no-go gates.
 
 ## Why this might be worth doing

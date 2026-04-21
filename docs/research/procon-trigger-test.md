@@ -1,5 +1,7 @@
 # Pro Controller wake-trigger test matrix
 
+> **⚠️ HISTORICAL — test was run, hypothesis was falsified.** This doc describes the test protocol we designed to validate whether the Pro Controller emits a detectable BLE wake advertisement. Results are in [`procon-trigger-test-results.md`](procon-trigger-test-results.md): the controller emits **zero BLE adv** in every state tested. Path 0 (ESP32 scan-and-react) is empirically dead. Kept for audit trail and as a template for future test matrices.
+
 Goal: empirically determine the exact controller state(s) under which the Switch 1 Pro Controller emits a BLE wake advertisement, so we know what's required for an ESP32 to detect it.
 
 ## Why this matters

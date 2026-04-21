@@ -76,15 +76,23 @@ Step 1 alone is hard. The BCM ROM is encrypted (the chip's ROM bootloader AES-de
 - **Side-channel observation** — watch what the patch RAM hooks call into ROM and triangulate the LL/HCI entry points. Tractable but slow.
 - **Glitching / chip decap** — physical attacks on the BCM ROM. Months-to-years of skilled work.
 
-**Bottom line**: controller-side wake adv modification is feasible in principle but requires either pioneering BCM20734 InternalBlue work or a public ROM dump that doesn't currently exist. It is no longer "impossible by encryption" — it's "blocked by missing prior art."
+**Bottom line at the time of writing**: controller-side wake adv modification is feasible in principle but requires either pioneering BCM20734 InternalBlue work or a public ROM dump that doesn't currently exist. It is no longer "impossible by encryption" — it's "blocked by missing prior art."
 
-The simpler attack of **rewriting the bonded host MAC at SPI `0x2000`** to point the wake adv at a Switch 2 also doesn't work: the controller would still emit a Switch-1-shaped adv (PID `0x2009`, possibly different PDU layout) targeted at the Switch 2's MAC, and the Switch 2's wake filter would reject it for the wrong PID and structure.
+The simpler attack of **rewriting the bonded host MAC at SPI `0x2000`** to point the wake adv at a Switch 2 also doesn't work: the controller would still emit a Switch-1-shaped adv (PID `0x2009`, possibly different PDU layout) targeted at the Switch 2's MAC, and the Switch 2's wake filter would reject it for the wrong PID and structure. (Also note: the controller is classic-BT-only in practice — see below.)
+
+## Updates after this doc was written
+
+Two subsequent findings further narrow what's possible:
+
+1. **The Pro Controller emits zero BLE adv on fw 4.33** ([`procon-trigger-test-results.md`](procon-trigger-test-results.md)). So there is no "wake adv we want to detect" on BLE at all — the wake/reconnect traffic is classic-BT paging, invisible to an ESP32 BLE radio. Path 0 (ESP32 scan-and-react) is dead.
+
+2. **SPI writes to patch RAM are rejected on fw 4.33** with status `0x01` "write protected" ([`spi-write-test-results.md`](spi-write-test-results.md)). Even a perfect ROM-symbol-discovery and a perfect patch RAM modification can't be delivered via the standard subcommand `0x11` write path that jc_toolkit and shinyquagsire23's 2017 code use. Nintendo added region-based write protection after 2017.
 
 ## The verdict on Path 4 (controller firmware mod)
 
-Stays in the "long-tail option, not on the critical path" bucket where [`status-and-next-steps.md`](../status-and-next-steps.md) put it. The findings here update *why* — it's the missing BCM20734 ROM analysis, not the encryption per se.
+**Effectively dead on current firmware** (Tier 1 combined success probability ~2-3% per `spi-write-test-results.md:62`). Kept as a long-tail option only if someone reverse-engineers Nintendo's OTA unlock command or finds a patch RAM memory-safety vulnerability.
 
-**Path 0 (ESP32 scan-and-react) remains the highest-ROI choice.** All the firmware spelunking confirms the ESP32-as-translator architecture is correctly aimed: the wake adv we want to detect is emitted on standard BLE channels by code we can't easily change, but the emission itself is observable with off-the-shelf hardware.
+The strategic implication: the ESP32-as-bridge architecture in [`../status-and-next-steps.md`](../status-and-next-steps.md) (Path A: pair Pro Controller TO ESP32 via classic BT, relay HOME presses) or Path B (physical piggyback mod) are the viable paths to the original goal. Path 0 (scan-and-react) is empirically dead. This doc's original conclusion that Path 0 was "the highest-ROI choice" was wrong — it was based on the then-prevailing hypothesis (from HelloRayH's SDR captures) that the controller emits detectable BLE adv, which was later falsified.
 
 ## Reproducibility
 

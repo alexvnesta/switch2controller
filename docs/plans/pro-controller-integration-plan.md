@@ -1,5 +1,7 @@
 # Pro Controller integration — ground-up plan
 
+> **Status: superseded by BlueRetro fork plan.** This was an early design sketch for implementing Pro Controller classic-BT HID host from scratch on ESP32. The project since pivoted to forking BlueRetro (see [`blueretro-fork-plan.md`](blueretro-fork-plan.md)) because BlueRetro already solves the classic-BT HID host problem with a proven bare-HCI stack, and Bluedroid's classic-BT HID host was abandoned in commit `d49429d` (unreliable scanning/pairing). Kept here for reference — the phase breakdown and coexistence-risk analysis below is still technically sound if anyone attempts a non-BlueRetro path.
+
 Goal: press HOME on a Switch 1 Pro Controller → ESP32 sends wake beacon → Switch 2 wakes.
 
 ## Why this is non-trivial
