@@ -6,7 +6,7 @@ Last updated: 2026-04-21
 
 **The ESP32 wakes a Switch 2 from sleep.** Working end-to-end since 2026-04-20:
 
-- Firmware: `esp32/src/switch2_wake.c` (NimBLE-based BLE advertiser, ~250 lines)
+- Firmware: `esp32/src/switch2_wake.c` (NimBLE-based BLE advertiser, ~250 lines) — **stored on disk as `switch2_wake.c.disabled` so PlatformIO doesn't try to compile it alongside the scanner**. See [`setup.md`](setup.md) for the filename swap.
 - Trigger: BOOT button short press → 2s wake burst → Switch wakes
 - Config via `secrets.h` (gitignored) or NVS — change MACs without reflashing
 - Documented byte-for-byte payload spec in [`research/wake-packet.md`](research/wake-packet.md)
@@ -26,14 +26,16 @@ See [`research/findings.md`](research/findings.md) for the comprehensive evidenc
 
 ### Path table (definitive)
 
+Status legend: **SCAFFOLD** = code exists but not yet compiled/tested · **PLANNED** = design doc only, no code · **DEAD** = empirically ruled out · **BLOCKED** = empirically blocked at delivery layer · **REJECTED** = ruled out by user preference.
+
 | Path | Effort | Success | Trade-off | Status |
 |---|---|---|---|---|
-| **0**: ESP32 scan-and-react (detect Pro Controller's BLE wake adv) | — | — | — | **Empirically dead.** Controller emits no BLE. See [`research/procon-trigger-test-results.md`](research/procon-trigger-test-results.md). |
-| **A**: Pair Pro Controller TO ESP32 over classic BT, fire wake on HOME-press | 2-3 days | ~95% | Controller may not simultaneously gameplay-pair to Switch 2 (untested) | **Top viable no-mod path.** Scaffold landed at [`procon-bridge/`](../procon-bridge/) (BlueRetro fork). |
-| **B**: Physical mod — XIAO ESP32-C3 inside controller, GPIO-tap HOME | 1 evening + soldering | ~90% | Soldering risk, ~$8 hardware | Pragmatic. See [`plans/pro-controller-piggyback-mod.md`](plans/pro-controller-piggyback-mod.md). |
-| **C**: Claim Switch 2's classic BT MAC and page-scan | 1-2 days | high | Causes pairing chaos during gameplay | **Rejected by user.** |
-| **D**: Sidestep — Wi-Fi HTTP trigger / BLE remote button / deep-sleep dongle | ~1 evening | ~99% | Doesn't use Pro Controller | Simplest "wake from across room" path. |
-| **Tier 1**: Modify Pro Controller firmware via patch RAM | — | ~2-3% | All-or-nothing | **Empirically blocked** (2026-04-21). Patch RAM (DS1 + DS2) returns `0x01` "write protected" on every probe; only color region accepts writes. See [`research/spi-write-test-results.md`](research/spi-write-test-results.md). |
+| **0**: ESP32 scan-and-react (detect Pro Controller's BLE wake adv) | — | — | — | **DEAD** — controller emits no BLE. See [`research/procon-trigger-test-results.md`](research/procon-trigger-test-results.md). |
+| **A**: Pair Pro Controller TO ESP32 over classic BT, fire wake on HOME-press | 2-3 days to complete from scaffold | ~95% | Controller may not simultaneously gameplay-pair to Switch 2 (untested) | **SCAFFOLD** — BlueRetro fork at [`procon-bridge/`](../procon-bridge/). Outstanding work listed in [`procon-bridge/README.md`](../procon-bridge/README.md). Top viable no-mod path once finished. |
+| **B**: Physical mod — XIAO ESP32-C3 inside controller, GPIO-tap HOME | 1 evening + soldering | ~90% | Soldering risk, ~$8 hardware | **PLANNED** — see [`plans/pro-controller-piggyback-mod.md`](plans/pro-controller-piggyback-mod.md). |
+| **C**: Claim Switch 2's classic BT MAC and page-scan | 1-2 days | high | Causes pairing chaos during gameplay | **REJECTED**. |
+| **D**: Sidestep — Wi-Fi HTTP trigger / BLE remote button / deep-sleep dongle | ~1 evening | ~99% | Doesn't use Pro Controller | **PLANNED** — simplest "wake from across room" path. |
+| **Tier 1**: Modify Pro Controller firmware via patch RAM | — | ~2-3% | All-or-nothing | **BLOCKED** (2026-04-21). Patch RAM (DS1 + DS2) returns `0x01` "write protected" on every probe; only color region accepts writes. See [`research/spi-write-test-results.md`](research/spi-write-test-results.md). |
 
 ### Recommended next move
 

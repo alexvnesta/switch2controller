@@ -2,6 +2,8 @@
 
 End-to-end instructions for getting the `esp32/` wake-beacon firmware running against your Switch 2. Assumes you're starting from nothing.
 
+> **Heads up on the filename swap**: Both firmware variants in `esp32/src/` are stored with a `.disabled` suffix so PlatformIO doesn't try to compile them simultaneously (they can't coexist — same entry points, different features). You'll rename `switch2_wake.c.disabled` → `switch2_wake.c` before flashing. Step 1 below walks you through enabling the scanner first; Step 2 swaps to the wake firmware. If you try `pio run` against the raw checkout without swapping, you'll get a "no source files" error — that's expected.
+
 ## What you need
 
 - An ESP32 dev board (classic ESP32-WROOM-32 recommended; also works on ESP32-C3/C6)
@@ -48,6 +50,8 @@ $EDITOR src/secrets.h   # fill in the values you captured
 Your `secrets.h` is gitignored, so it stays on your machine.
 
 ## Step 3: Flash and wake
+
+Assumes Step 2 completed — i.e., `esp32/src/switch2_wake.c` is now the active source file (no `.disabled` suffix) and `ble_scanner.c.disabled` is not.
 
 ```bash
 ~/.platformio/penv/bin/pio run -t upload

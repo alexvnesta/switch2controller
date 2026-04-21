@@ -32,9 +32,9 @@ Start with **[`docs/status-and-next-steps.md`](docs/status-and-next-steps.md)** 
 
 Three live paths to wiring up a Pro Controller as a wake trigger:
 
-- **Path A — BlueRetro fork** (scaffold at [`procon-bridge/`](procon-bridge/)): pair the Pro Controller TO an ESP32 over classic BT, fire the wake burst on HOME-press. Top viable no-mod path. ~2-3 days. Open trade-off: single-host bond slot on stock firmware may mean the controller can't simultaneously gameplay-pair to the Switch 2.
-- **Path B — physical piggyback mod**: XIAO ESP32-C3 soldered inside the controller, GPIO-tap on the HOME pad. Preserves gameplay pairing with the Switch 2. ~1 evening + soldering. See [`docs/plans/pro-controller-piggyback-mod.md`](docs/plans/pro-controller-piggyback-mod.md).
-- **Path D — sidestep**: Wi-Fi HTTP trigger, or a $3 BLE remote button. Ships in an afternoon. Doesn't use the Pro Controller specifically.
+- **Path A — BlueRetro fork** (scaffold only, not yet compiled or flashed): pair the Pro Controller TO an ESP32 over classic BT, fire the wake burst on HOME-press. Top viable no-mod path in principle. ~2-3 days of work to finish from the scaffold. See [`procon-bridge/README.md`](procon-bridge/README.md) for outstanding work (set Switch 2 target MAC, bypass `wired_init_task` waitloop, build, flash, test). Open trade-off: single-host bond slot on stock firmware may mean the controller can't simultaneously gameplay-pair to the Switch 2.
+- **Path B — physical piggyback mod** (planned, not built): XIAO ESP32-C3 soldered inside the controller, GPIO-tap on the HOME pad. Preserves gameplay pairing with the Switch 2. ~1 evening + soldering. See [`docs/plans/pro-controller-piggyback-mod.md`](docs/plans/pro-controller-piggyback-mod.md).
+- **Path D — sidestep** (not built): Wi-Fi HTTP trigger, or a $3 BLE remote button. Ships in an afternoon. Doesn't use the Pro Controller specifically.
 
 Dead ends (kept documented for audit trail):
 - Path 0 (ESP32 scan-and-react) — empirically killed: controller emits no BLE
