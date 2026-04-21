@@ -9,6 +9,8 @@ build/
 __pycache__/
 *.pyc
 references/BlueRetro/
+references/ndeadly-switch2-research/
+references/mfro-switch-controller-testing/
 
 # PlatformIO generated artifacts
 esp32/sdkconfig.esp32dev
@@ -19,3 +21,9 @@ esp32/src/secrets.h
 
 # Firmware samples and bulky captures
 /tmp/*.log
+esp32/captures/
+captures/
+procon-bridge/build/
+procon-bridge/.pio/
+procon-bridge/sdkconfig
+procon-bridge/sdkconfig.old

@@ -1,0 +1,49 @@
+name: quick
+on:
+  workflow_dispatch:
+    inputs:
+      hw_version:
+        description: 'Hardware version'
+        required: true
+        default: 'hw1'
+      br_config:
+        description: 'BlueRetro config'
+        required: true
+        default: 'universal'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/darthcloud/idf-blueretro:v5.5.0_2024-12-02
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        fetch-depth: 0
+    - name: Build with ESP-IDF
+      shell: bash
+      run: |
+        . $IDF_PATH/export.sh
+        echo "br_version=$(git describe --always --tags --dirty)" >> $GITHUB_ENV
+        echo "$(git describe --always --tags --dirty) ${{ github.event.inputs.hw_version }} ${{ github.event.inputs.br_config }}" | cut -c -31 > version.txt
+        cat version.txt
+        cp configs/${{ github.event.inputs.hw_version }}/${{ github.event.inputs.br_config }} sdkconfig
+        BR_HW=_${{ github.event.inputs.hw_version }} BR_SYS=_${{ github.event.inputs.br_config }} idf.py build
+    - name: Copy OTA initial binary
+      working-directory: ./build
+      run: |
+        mkdir ota
+        mv ota_data_initial.bin ota/
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.br_version }}_${{ github.event.inputs.hw_version }}_${{ github.event.inputs.br_config }}
+        path: |
+          build/partition_table/partition-table.bin
+          build/bootloader/bootloader.bin
+          build/ota/ota_data_initial.bin
+          build/BlueRetro*.bin
+        if-no-files-found: error

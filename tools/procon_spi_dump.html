@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pro Controller SPI Dump</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; max-width: 720px; margin: 2em auto; padding: 0 1em; line-height: 1.5; }
+  h1 { font-size: 1.4em; }
+  button { font-size: 1em; padding: 0.5em 1em; cursor: pointer; }
+  button:disabled { cursor: wait; opacity: 0.6; }
+  #log { background: #1a1a1a; color: #c0c0c0; padding: 1em; border-radius: 6px; font-family: ui-monospace, Menlo, monospace; font-size: 0.85em; height: 300px; overflow-y: auto; white-space: pre-wrap; }
+  .progress { background: #eee; border-radius: 4px; height: 20px; overflow: hidden; margin: 0.5em 0; }
+  .bar { background: linear-gradient(90deg, #3b82f6, #06b6d4); height: 100%; transition: width 0.1s; }
+  .info { background: #fef3c7; border-left: 4px solid #f59e0b; padding: 0.75em; border-radius: 4px; font-size: 0.9em; }
+</style>
+</head>
+<body>
+<h1>Switch Pro Controller SPI Dump</h1>
+
+<div class="info">
+  <b>Read-only.</b> This page only sends SPI Flash <i>Read</i> subcommands (0x10). No writes. No risk of bricking.
+  Adapted from <a href="https://github.com/mzyy94/joycon-toolweb">mzyy94/joycon-toolweb</a>.
+  Requires a WebHID-capable browser (Chrome/Edge).
+</div>
+
+<p>
+  <button id="connect">1. Connect Pro Controller</button>
+  <button id="dump" disabled>2. Dump SPI (524 KB, ~30s)</button>
+  <button id="save" disabled>3. Save .bin</button>
+</p>
+
+<div class="progress"><div id="bar" class="bar" style="width:0"></div></div>
+<div id="status">Idle</div>
+<div id="log"></div>
+
+<script type="module">
+const VID = 0x057E;
+const PID_PROCON = 0x2009;
+const PID_JOYCON_L = 0x2006;
+const PID_JOYCON_R = 0x2007;
+
+const SPI_FLASH_SIZE = 0x80000;     // 512 KB
+// dekuNukem docs say max 0x1C (28); CTCaer's jc_toolkit uses 0x1D (29).
+// Some forks have pushed to 0x3A (58) successfully. Try larger first; if the
+// firmware NAKs we'll fall back automatically (the spiRead retry will see the
+// length mismatch in the echo filter and reject the response, then retry).
+const SPI_READ_CHUNK = 0x1D;        // start at known-safe; we'll auto-tune below
+
+const log = (msg) => {
+  const el = document.getElementById('log');
+  const ts = new Date().toLocaleTimeString();
+  el.textContent += `[${ts}] ${msg}\n`;
+  el.scrollTop = el.scrollHeight;
+};
+const status = (msg) => { document.getElementById('status').textContent = msg; };
+const setBar = (pct) => { document.getElementById('bar').style.width = pct + '%'; };
+
+let device = null;
+let dumpedBlob = null;
+let packetNum = 0;
+
+document.getElementById('connect').onclick = async () => {
+  try {
+    const filters = [
+      { vendorId: VID, productId: PID_PROCON },
+      { vendorId: VID, productId: PID_JOYCON_L },
+      { vendorId: VID, productId: PID_JOYCON_R },
+    ];
+    const devs = await navigator.hid.requestDevice({ filters });
+    if (!devs.length) { log('No device selected'); return; }
+    device = devs[0];
+    if (!device.opened) await device.open();
+    log(`Connected: ${device.productName} (PID 0x${device.productId.toString(16)})`);
+    status('Connected. Ready to dump.');
+
+    // USB handshake (only needed for USB-mode connections; harmless over BT)
+    await usbHandshake();
+
+    // Verify by reading device info
+    const info = await sendSubCommand(0x02);  // Device Info
+    if (info) {
+      const fw = `${info.getUint8(0)}.${info.getUint8(1)}`;
+      const type = info.getUint8(2);
+      const macBytes = [];
+      for (let i = 0; i < 6; i++) macBytes.push(info.getUint8(4 + i).toString(16).padStart(2, '0'));
+      log(`Device info: type=${type}, fw=${fw}, mac=${macBytes.join(':').toUpperCase()}`);
+    }
+
+    document.getElementById('dump').disabled = false;
+  } catch (e) {
+    log(`ERROR: ${e.message}`);
+    console.error(e);
+  }
+};
+
+document.getElementById('dump').onclick = async () => {
+  document.getElementById('connect').disabled = true;
+  document.getElementById('dump').disabled = true;
+  try {
+    const buf = new Uint8Array(SPI_FLASH_SIZE);
+    buf.fill(0xFF);
+
+    let addr = 0;
+    let retries = 0;
+    let failedAddrs = 0;
+    const start = performance.now();
+    let lastUiUpdate = 0;
+
+    while (addr < SPI_FLASH_SIZE) {
+      const len = Math.min(SPI_READ_CHUNK, SPI_FLASH_SIZE - addr);
+      const data = await spiRead(addr, len).catch(() => null);
+      if (data === null) {
+        retries++;
+        if (retries > 5) {
+          log(`Skip 0x${addr.toString(16).padStart(6, '0')} after 5 retries`);
+          failedAddrs++;
+          addr += len;
+          retries = 0;
+        }
+        continue;
+      }
+      retries = 0;
+      buf.set(new Uint8Array(data), addr);
+      addr += data.byteLength;
+
+      const now = performance.now();
+      if (now - lastUiUpdate > 100) {
+        const pct = (100 * addr / SPI_FLASH_SIZE);
+        const elapsed = (now - start) / 1000;
+        const rate = addr / elapsed / 1024;
+        const eta = (SPI_FLASH_SIZE - addr) / (addr / elapsed);
+        setBar(pct);
+        status(`0x${addr.toString(16).padStart(6, '0')} / 0x${SPI_FLASH_SIZE.toString(16)}  (${pct.toFixed(1)}%)  ${rate.toFixed(1)} KB/s  ETA ${eta.toFixed(0)}s`);
+        lastUiUpdate = now;
+      }
+    }
+
+    const elapsed = ((performance.now() - start) / 1000).toFixed(1);
+    log(`Dump complete in ${elapsed}s. Skipped chunks: ${failedAddrs}`);
+    setBar(100);
+    status(`Dump complete. ${SPI_FLASH_SIZE} bytes ready to save.`);
+
+    dumpedBlob = new Blob([buf], { type: 'application/octet-stream' });
+    document.getElementById('save').disabled = false;
+  } catch (e) {
+    log(`Dump ERROR: ${e.message}`);
+    console.error(e);
+  } finally {
+    document.getElementById('connect').disabled = false;
+  }
+};
+
+document.getElementById('save').onclick = () => {
+  const url = URL.createObjectURL(dumpedBlob);
+  const a = document.createElement('a');
+  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  a.href = url;
+  a.download = `procon-spi-${ts}.bin`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  log(`Downloaded ${a.download}`);
+};
+
+// === Protocol helpers (adapted from mzyy94/joycon-toolweb) ===
+
+async function usbHandshake() {
+  try {
+    const collections = device.collections || [];
+    const hasOutput80 = collections[0]?.outputReports?.find(r => r.reportId === 0x80);
+    if (!hasOutput80) {
+      log('USB-mode not available (likely BT-connected); skipping handshake');
+      return;
+    }
+    log('USB handshake...');
+    await device.sendReport(0x80, new Uint8Array([0x05]));  // Stop UART
+    await sendReport(0x80, new Uint8Array([0x02]),
+      (id, d) => id === 0x81 && d?.getUint8(0) === 0x02, 500, 3)
+      .catch(() => log('Handshake reply not received (continuing)'));
+    await device.sendReport(0x80, new Uint8Array([0x04]));  // Start UART, disable timeout
+    log('Handshake complete');
+  } catch (e) {
+    log(`Handshake error (continuing): ${e.message}`);
+  }
+}
+
+async function sendReport(reportId, sendData, filter, timeout = 1000, retry = 3) {
+  return new Promise((resolve, reject) => {
+    const timeoutHandle = setTimeout(() => {
+      device.removeEventListener('inputreport', reporter);
+      if (retry > 0) {
+        sendReport(reportId, sendData, filter, timeout, retry - 1).then(resolve).catch(reject);
+      } else {
+        reject(new Error(`timeout reportId=${reportId}`));
+      }
+    }, timeout);
+    const reporter = ({ reportId: rid, data }) => {
+      if (filter?.(rid, data)) {
+        clearTimeout(timeoutHandle);
+        device.removeEventListener('inputreport', reporter);
+        resolve(data);
+      }
+    };
+    device.addEventListener('inputreport', reporter);
+    device.sendReport(reportId, sendData);
+  });
+}
+
+async function sendSubCommand(scmd, body = []) {
+  const reportId = 0x01;
+  const data = new Uint8Array([packetNum++ & 0xF, 0, 1, 64, 64, 0, 1, 64, 64, scmd, ...body]);
+  const filter = (rid, d) => rid === 0x21 && d.getUint8(13) === scmd;
+  const reply = await sendReport(reportId, data, filter, 1000, 3);
+  return new DataView(reply.buffer.slice(14));
+}
+
+async function spiRead(address, length) {
+  // Tight timeout/retry: we expect <50 ms for each successful read; if we miss it,
+  // re-fire fast rather than waiting on the long retry path.
+  const sendData = new Uint8Array(5);
+  const dv = new DataView(sendData.buffer);
+  dv.setUint32(0, address, true);
+  dv.setUint8(4, length);
+  const reportId = 0x01;
+  const reportData = new Uint8Array([packetNum++ & 0xF, 0, 1, 64, 64, 0, 1, 64, 64, 0x10, ...sendData]);
+  const filter = (rid, d) => {
+    if (rid !== 0x21 || d.getUint8(13) !== 0x10) return false;
+    const echoAddr = d.getUint32(14, true);
+    const echoLen = d.getUint8(18);
+    return echoAddr === address && echoLen === length;
+  };
+  const reply = await sendReport(reportId, reportData, filter, 100, 5);
+  return reply.buffer.slice(19, 19 + length);
+}
+</script>
+</body>
+</html>
