@@ -27,3 +27,4 @@ procon-bridge/build/
 procon-bridge/.pio/
 procon-bridge/sdkconfig
 procon-bridge/sdkconfig.old
+.claude/settings.local.json
